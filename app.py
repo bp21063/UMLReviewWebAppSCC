@@ -17,6 +17,7 @@ from services import (
     LLMConfigurationError,
     LLMGenerationError,
     get_api_key,
+    get_password,
     generate_python_code,
 )
 WAIT_INPUT_MARKER = "__UML_REVIEW_WAIT_INPUT__"
@@ -295,6 +296,8 @@ def ensure_session_defaults() -> None:
         st.session_state["diagram_type"] = ""
     if "generation_provider" not in st.session_state:
         st.session_state["generation_provider"] = ""
+    if "password_input" not in st.session_state:
+        st.session_state["password_input"] = ""
 
 
 SUPPORTED_LLM_PROVIDER_LABELS = {
@@ -442,6 +445,21 @@ def main():
     # セッション状態の初期化
     ensure_session_defaults()
 
+    # サイドバー: パスワード認証
+    with st.sidebar:
+        st.markdown("### 認証")
+        st.text_input(
+            "パスワード",
+            type="password",
+            key="password_input",
+            help="コード生成機能を使用するにはパスワードが必要です。",
+        )
+        correct_password = get_password()
+        if st.session_state["password_input"] == correct_password and correct_password:
+            st.success("認証済み")
+        elif st.session_state["password_input"]:
+            st.error("パスワードが正しくありません")
+
     # カスタムCSS（モバイル対応）
     st.markdown("""
     <style>
@@ -524,6 +542,13 @@ def show_upload_page():
                     st.caption(f"使用中のモデル: {provider_label}")
                     if llm_config_error:
                         st.warning(llm_config_error)
+
+                    # パスワード認証チェック
+                    correct_password = get_password()
+                    is_authenticated = (
+                        st.session_state["password_input"] == correct_password
+                        and correct_password
+                    )
                     
                     # 生成ボタン
                     button_disabled = diagram_type == "未選択" or llm_config_error is not None
