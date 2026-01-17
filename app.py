@@ -613,7 +613,7 @@ def show_upload_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
