@@ -551,9 +551,15 @@ def show_upload_page():
                     )
                     
                     # 生成ボタン
-                    button_disabled = diagram_type == "未選択" or llm_config_error is not None
+                    button_disabled = (
+                        diagram_type == "未選択"
+                        or llm_config_error is not None
+                        or not is_authenticated
+                    )
                     if diagram_type == "未選択":
                         st.info("図の種類を選択してからコード生成を行ってください")
+                    elif not is_authenticated:
+                        st.info("コード生成にはサイドバーから正しいパスワードを入力してください")
                     if st.button("コード生成・実行", type="primary", use_container_width=True, disabled=button_disabled):
                         session_id = st.session_state['session_id']
                         manager = get_executor_manager()
