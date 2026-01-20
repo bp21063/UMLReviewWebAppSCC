@@ -687,7 +687,7 @@ def show_execution_page():
 
         # 入力ボタン
         st.markdown("**入力ボタン:**")
-        col_left, col_a, col_b, col_right = st.columns([0.5, 1, 1, 0.5])
+        col_left, col_a, col_b, col_c, col_right = st.columns([0.5, 1, 1, 1, 0.5])
         waiting = executor_state.waiting_input
         with col_a:
             if st.button("A", use_container_width=True, disabled=not waiting):
@@ -697,12 +697,16 @@ def show_execution_page():
             if st.button("B", use_container_width=True, disabled=not waiting):
                 if manager.send_input(session_id, "B"):
                     st.rerun()
+        with col_c:
+            if st.button("C", use_container_width=True, disabled=not waiting):
+                if manager.send_input(session_id, "C"):
+                    st.rerun()                   
         with col_left:
             st.write("")
         with col_right:
             st.write("")
         if waiting:
-            st.info("コードが入力待ち状態です。A/B ボタンで入力を送信できます。")
+            st.info("コードが入力待ち状態です。A/B/C ボタンで入力を送信できます。")
 
         # 出力表示
         header_col, clear_col = st.columns([4, 1])
