@@ -301,7 +301,7 @@ def ensure_session_defaults() -> None:
 
 
 SUPPORTED_LLM_PROVIDER_LABELS = {
-    "gemini": "Gemini 2.5 Flash",
+    "gemini": "Google Gemini",
     "openai": "OpenAI",
 }
 
@@ -531,7 +531,7 @@ def show_upload_page():
                     # 図の種類選択プルダウン
                     diagram_type = st.selectbox(
                         "図の種類を選択してください:",
-                        options=["ステートマシン図"],
+                        options=["未選択", "ステートマシン図", "フローチャート図", "シーケンス図"],
                         index=0,
                         key="diagram_type_select"
                     )
@@ -539,17 +539,17 @@ def show_upload_page():
                     llm_provider = get_active_llm_provider()
                     provider_label = get_llm_provider_label(llm_provider)
                     llm_config_error = get_llm_configuration_error(llm_provider)
-                    st.caption(f"使用中のモデル: {provider_label}")
+                    st.caption(f"使用中のLLM: {provider_label}")
                     if llm_config_error:
                         st.warning(llm_config_error)
-
+                    
                     # パスワード認証チェック
                     correct_password = get_password()
                     is_authenticated = (
                         st.session_state["password_input"] == correct_password
                         and correct_password
                     )
-                    
+
                     # 生成ボタン
                     button_disabled = (
                         diagram_type == "未選択"
@@ -558,8 +558,8 @@ def show_upload_page():
                     )
                     if diagram_type == "未選択":
                         st.info("図の種類を選択してからコード生成を行ってください")
-                    elif not is_authenticated:
-                        st.info("コード生成にはサイドバーから正しいパスワードを入力してください")
+                    if not is_authenticated:
+                        st.info("左側のメニューからパスワードを入力してください")
                     if st.button("コード生成・実行", type="primary", use_container_width=True, disabled=button_disabled):
                         session_id = st.session_state['session_id']
                         manager = get_executor_manager()

@@ -214,6 +214,35 @@ def _get_provider(name: Optional[str]) -> Tuple[str, LLMProvider]:
         return provider_name, provider
 
 
+_DIAGRAM_SPECIFIC_INSTRUCTIONS: Dict[str, str] = {
+    "ステートマシン図": (
+        "  - Diagram-specific (State Machine):\n"
+        "    * Identify all states and transitions depicted in the diagram.\n"
+        "    * Use wait_input() for transitions triggered by user input events (button presses).\n"
+        "    * Use time.sleep() for transitions triggered by timer/timeout events.\n"
+        "    * Print the current state name at the beginning of each state.\n"
+    ),
+    "フローチャート図": (
+        "  - Diagram-specific (Flowchart):\n"
+        "    * Treat the flowchart as defining a system's behavioral flow equivalent to a state machine.\n"
+        "    * Map each decision branch (Yes/No, condition true/false) to a state transition.\n"
+        "    * Where the flowchart shows user interaction or external input, use wait_input() (returns 'A' or 'B').\n"
+        "    * Where the flowchart shows processing steps or timed delays, use logic and time.sleep().\n"
+        "    * The generated code must produce the same runtime behavior as a state machine of the same system.\n"
+        "    * Print a message describing the current step or decision at each key point.\n"
+    ),
+    "シーケンス図": (
+        "  - Diagram-specific (Sequence Diagram):\n"
+        "    * Interpret the sequence diagram as defining a system's behavioral flow through actor message exchanges.\n"
+        "    * Implement the behavior as a sequential or state-based flow matching the message order.\n"
+        "    * Where the diagram shows user-initiated messages or interactions, use wait_input() (returns 'A' or 'B').\n"
+        "    * Where the diagram shows system-generated messages or timed events, use time.sleep() and print().\n"
+        "    * The generated code must produce the same runtime behavior as a state machine of the same system.\n"
+        "    * Print messages that correspond to the message labels shown in the diagram, prefixed with the sender actor name.\n"
+    ),
+}
+
+
 def _build_prompts(
     diagram_type: str,
     session_id: str,
@@ -234,6 +263,7 @@ def _build_prompts(
         ),
     )
     instructions = prompt_overrides.get("additional_instructions", "")
+    diagram_instructions = _DIAGRAM_SPECIFIC_INSTRUCTIONS.get(diagram_type, "")
     user_prompt = (
         "Analyze the UML diagram and generate runnable Python code.\n"
         f"- Session ID: {session_id}\n"
@@ -255,8 +285,10 @@ def _build_prompts(
         "  4. Include time.sleep() to prevent busy loops.\n"
         "  5. Add brief print() statements for state transitions (in Japanese).\n"
         "  6. Keep comments minimal—at most one short line per function. No verbose explanations.\n"
-        "- Output: Return ONLY Python code in a single ```python``` block. No markdown explanations.\n"
     )
+    if diagram_instructions:
+        user_prompt += diagram_instructions
+    user_prompt += "- Output: Return ONLY Python code in a single ```python``` block. No markdown explanations.\n"
     if instructions:
         user_prompt += f"\nAdditional requirements:\n{instructions}\n"
     return system_prompt, user_prompt
