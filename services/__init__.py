@@ -2,13 +2,56 @@ from .llm_client import (
     LLMConfigurationError,
     LLMGenerationError,
     generate_python_code,
+    analyze_class_diagram,
+    generate_object_diagram,
+    generate_class_instances_and_verify,
+    ClassDiagramAnalysis,
+    ObjectDiagramResult,
+    MultiplicityIssue,
+    ObjectDiagram,
+    MultiplicityVerification,
+    ClassDiagramWithInstances,
+    InstanceObject,
+    InstanceConnection,
 )
-from .config_loader import get_api_key, get_password
+from .config_loader import get_api_key, get_password, get_teacher_password
+from .assignment_service import (
+    create_assignment,
+    get_assignment,
+    load_assignments,
+    load_logs,
+    save_log_entry,
+    delete_assignment,
+)
+from .simulators import (
+    list_simulator_options,
+    get_simulator,
+)
 
 __all__ = [
     "LLMConfigurationError",
     "LLMGenerationError",
     "generate_python_code",
+    "analyze_class_diagram",
+    "generate_object_diagram",
+    "generate_class_instances_and_verify",
+    "ClassDiagramAnalysis",
+    "ObjectDiagramResult",
+    "MultiplicityIssue",
+    "ObjectDiagram",
+    "MultiplicityVerification",
+    "ClassDiagramWithInstances",
+    "InstanceObject",
+    "InstanceConnection",
     "get_api_key",
     "get_password",
+    "get_teacher_password",
+    "create_assignment",
+    "get_assignment",
+    "load_assignments",
+    "load_logs",
+    "save_log_entry",
+    "delete_assignment",
+    "list_simulator_options",
+    "get_simulator",
 ]

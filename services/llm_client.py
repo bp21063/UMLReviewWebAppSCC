@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
@@ -42,6 +42,67 @@ class ProviderResponse:
     model: str
     usage: Dict[str, Any]
     raw: Dict[str, Any]
+
+
+@dataclass
+class MultiplicityIssue:
+    from_class: str
+    to_class: str
+    current_multiplicity: str
+    issue: str
+    severity: str
+    relationship_index: int
+
+
+@dataclass
+class ClassDiagramAnalysis:
+    mermaid: str
+    classes: List[Dict[str, Any]]
+    relationships: List[Dict[str, Any]]
+    multiplicity_issues: List[MultiplicityIssue]
+    needs_object_diagram: bool
+
+
+@dataclass
+class ObjectDiagram:
+    relationship_index: int
+    mermaid: str
+    explanation: str
+
+
+@dataclass
+class ObjectDiagramResult:
+    object_diagrams: List[ObjectDiagram]
+
+
+@dataclass
+class MultiplicityVerification:
+    from_class: str
+    to_class: str
+    original_multiplicity: str
+    verdict: str  # "ok" / "warning" / "error"
+    explanation: str
+
+
+@dataclass
+class InstanceObject:
+    class_name: str
+    instance_name: str
+    attributes: Dict[str, str]
+
+
+@dataclass
+class InstanceConnection:
+    from_instance: str
+    to_instance: str
+
+
+@dataclass
+class ClassDiagramWithInstances:
+    instances: List[InstanceObject]
+    connections: List[InstanceConnection]
+    instance_explanation: str
+    multiplicity_verifications: List[MultiplicityVerification]
 
 
 class LLMProvider:
@@ -91,7 +152,11 @@ class GeminiProvider(LLMProvider):
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 16000,
+                "thinkingConfig": {"thinkingLevel": "medium"},
+            },
         }
         response = requests.post(
             self._url,
@@ -198,7 +263,7 @@ def _get_provider(name: Optional[str]) -> Tuple[str, LLMProvider]:
         if provider_name == "gemini":
             provider = GeminiProvider(
                 api_key=get_api_key("GOOGLE_API_KEY"),
-                model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+                model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
             )
         elif provider_name == "openai":
             provider = OpenAIProvider(
@@ -226,19 +291,10 @@ _DIAGRAM_SPECIFIC_INSTRUCTIONS: Dict[str, str] = {
         "  - Diagram-specific (Flowchart):\n"
         "    * Treat the flowchart as defining a system's behavioral flow equivalent to a state machine.\n"
         "    * Map each decision branch (Yes/No, condition true/false) to a state transition.\n"
-        "    * Where the flowchart shows user interaction or external input, use wait_input() (returns 'A' or 'B').\n"
+        "    * Where the flowchart shows user interaction or external input, use wait_input() (returns 'A', 'B', or 'C').\n"
         "    * Where the flowchart shows processing steps or timed delays, use logic and time.sleep().\n"
         "    * The generated code must produce the same runtime behavior as a state machine of the same system.\n"
         "    * Print a message describing the current step or decision at each key point.\n"
-    ),
-    "シーケンス図": (
-        "  - Diagram-specific (Sequence Diagram):\n"
-        "    * Interpret the sequence diagram as defining a system's behavioral flow through actor message exchanges.\n"
-        "    * Implement the behavior as a sequential or state-based flow matching the message order.\n"
-        "    * Where the diagram shows user-initiated messages or interactions, use wait_input() (returns 'A' or 'B').\n"
-        "    * Where the diagram shows system-generated messages or timed events, use time.sleep() and print().\n"
-        "    * The generated code must produce the same runtime behavior as a state machine of the same system.\n"
-        "    * Print messages that correspond to the message labels shown in the diagram, prefixed with the sender actor name.\n"
     ),
 }
 
@@ -275,14 +331,14 @@ def _build_prompts(
         "     - ONLY use wait_input() if the UML diagram explicitly shows user input/button events.\n"
         "     - If the diagram shows only time-based transitions (e.g., traffic light cycling automatically), "
         "do NOT use wait_input(). Use time.sleep() instead.\n"
-        "     - wait_input() returns only 'A', 'B' or 'C'. Map multiple actions to these three buttons creatively.\n"
-        "     - However, you do NOT have to use all three buttons in every state. If the UML behavior can be fully expressed with only two buttons in a given state (or overall), it is acceptable to leave the remaining button unused.\n"
-        "     - In states where only a subset of buttons is valid, if an unexpected button is pressed (e.g., the unused one), print exactly: '入力が想定と異なるため状態を維持します' and keep the current state unchanged (no transition, no error). Continue the loop/state handling.\n"
+        "     - wait_input() returns 'A', 'B', or 'C'. Map actions to these three buttons creatively; "
+        "if the diagram only needs two choices, use just 'A' and 'B' and ignore 'C'.\n"
         "     - Do NOT define wait_input() in the code.\n"
         "     - NEVER include comments explaining wait_input() (e.g., '# wait for user input', "
         "'# ユーザー入力を待つ', '# ホスト提供関数'). This is strictly forbidden.\n"
-        "     - BEFORE calling wait_input(), ALWAYS print a guidance message explaining what A and B do "
-        "in the current state. Example: print('A: 電源ON / B: チャイルドロック切替'). "
+        "     - BEFORE calling wait_input(), ALWAYS print a guidance message explaining what each button "
+        "that is relevant in the current state does. Example: print('A: 再生/一時停止 / B: 次の曲 / C: 前の曲'). "
+        "Only mention buttons that are actually usable in that state. "
         "This helps users understand button actions.\n"
         "  4. Include time.sleep() to prevent busy loops.\n"
         "  5. Add brief print() statements for state transitions (in Japanese).\n"
@@ -303,6 +359,22 @@ def _extract_code(text: str) -> str:
     if matches:
         return matches[0].strip()
     return text.strip()
+
+
+def _extract_json(text: str) -> Dict[str, Any]:
+    """Extract and parse JSON from an LLM response."""
+    # Try stripping ```json``` or ``` blocks first
+    pattern = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+    matches = pattern.findall(text)
+    candidate = matches[0].strip() if matches else text.strip()
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        # Fallback: find the first {...} block in the text
+        brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if brace_match:
+            return json.loads(brace_match.group())
+        raise
 
 
 def _log_event(payload: Dict[str, Any]) -> None:
@@ -392,6 +464,394 @@ def generate_python_code(
                 "error": f"network_error: {exc}",
             }
         )
+        raise LLMGenerationError(f"LLM API 呼び出し中にネットワークエラーが発生しました: {exc}") from exc
+    finally:
+        log_context.setdefault("duration_ms", int((time.time() - start_time) * 1000))
+        _log_event(log_context)
+
+
+# ---------------------------------------------------------------------------
+# Class diagram analysis (two-stage LLM calls)
+# ---------------------------------------------------------------------------
+
+_CLASS_DIAGRAM_SYSTEM_PROMPT = (
+    "You are an assistant that analyzes UML class diagrams. "
+    "Extract the class structure, identify relationships and multiplicities, "
+    "and detect potential multiplicity issues. "
+    "Return your analysis as a single JSON object with no surrounding text or markdown."
+)
+
+_CLASS_DIAGRAM_USER_PROMPT = """\
+Analyze the UML class diagram in the attached image and return a JSON object.
+
+Requirements:
+1. Use the EXACT class names, attribute names, and operation names as they appear in the image.
+2. Visibility: "+" public, "-" private, "#" protected, "~" package.
+3. Relationship types: "association", "aggregation", "composition", "inheritance", "realization", "dependency".
+4. Index relationships starting from 0, in the same order they appear in the "mermaid" field.
+5. Detect multiplicity issues: flag relationships where the multiplicity is likely incorrect or ambiguous. Provide a Japanese explanation in "issue".
+6. Set "needs_object_diagram" to true if any multiplicity_issues exist, otherwise false.
+7. Return ONLY the JSON object — no markdown, no code blocks, no extra text.
+8. The "mermaid" field must contain valid Mermaid classDiagram syntax. Follow these rules strictly:
+   - Do NOT use UML constraint annotations such as {id}, {readOnly}, {ordered}, {unique} anywhere.
+   - Stereotypes (<<enumeration>>, <<interface>>, <<abstract>>) must appear as the FIRST line inside a class block: class Foo { <<enumeration>> ... }. Never place them after the class name on the same line.
+   - Use only simple attribute types (String, int, bool, float, List, etc.). Do not use complex generic types like Map<K,V>.
+   - Class names containing spaces or special characters must be quoted with double quotes.
+
+JSON format:
+{
+  "mermaid": "classDiagram\\n    ClassA \\"1\\" --> \\"*\\" ClassB : label\\n    ...",
+  "classes": [
+    {
+      "name": "ClassName",
+      "attributes": [{"name": "attrName", "type": "Type", "visibility": "+"}],
+      "operations": [{"name": "methodName(arg: Type)", "visibility": "+"}]
+    }
+  ],
+  "relationships": [
+    {
+      "from": "ClassA",
+      "to": "ClassB",
+      "type": "association",
+      "multiplicity_from": "1",
+      "multiplicity_to": "*",
+      "label": "label",
+      "index": 0
+    }
+  ],
+  "multiplicity_issues": [
+    {
+      "from": "ClassA",
+      "to": "ClassB",
+      "current_multiplicity": "1:1",
+      "issue": "問題の説明（日本語）",
+      "severity": "warning",
+      "relationship_index": 0
+    }
+  ],
+  "needs_object_diagram": true
+}
+"""
+
+_OBJECT_DIAGRAM_SYSTEM_PROMPT = (
+    "You are an assistant that generates UML object diagram examples "
+    "to illustrate multiplicity issues in class diagrams. "
+    "Use Mermaid classDiagram notation to approximate object diagrams. "
+    "Return your result as a single JSON object with no surrounding text or markdown."
+)
+
+
+def _build_object_diagram_user_prompt(
+    classes: List[Dict[str, Any]],
+    issues: List[MultiplicityIssue],
+) -> str:
+    classes_json = json.dumps(classes, ensure_ascii=False, indent=2)
+    issues_json = json.dumps(
+        [
+            {
+                "from": i.from_class,
+                "to": i.to_class,
+                "current_multiplicity": i.current_multiplicity,
+                "issue": i.issue,
+                "severity": i.severity,
+                "relationship_index": i.relationship_index,
+            }
+            for i in issues
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+    return f"""\
+Given the following class structure and multiplicity issues, generate object diagram examples.
+
+Class structure:
+{classes_json}
+
+Multiplicity issues:
+{issues_json}
+
+Requirements:
+1. For each multiplicity issue, create a Mermaid classDiagram that shows concrete instances.
+2. Use backtick notation for instance names: class `instanceName : ClassName`.
+3. Show actual values for attributes (no types). Do NOT show operations.
+4. Show the relationship between instances that demonstrates the issue.
+5. Write the "explanation" in Japanese.
+6. Set "relationship_index" to match the issue's relationship_index.
+7. Return ONLY the JSON object — no markdown, no code blocks, no extra text.
+
+JSON format:
+{{
+  "object_diagrams": [
+    {{
+      "relationship_index": 0,
+      "mermaid": "classDiagram\\n    class `inst1 : ClassName` {{\\n        attr = value\\n    }}\\n    ...",
+      "explanation": "説明（日本語）"
+    }}
+  ]
+}}
+"""
+
+
+_INSTANCE_GEN_SYSTEM_PROMPT = (
+    "You are an assistant that analyzes UML class diagrams, generates concrete instance examples, "
+    "and verifies the appropriateness of each relationship's multiplicity. "
+    "Return your result as a single JSON object with no surrounding text or markdown."
+)
+
+_INSTANCE_GEN_USER_PROMPT = """\
+Analyze the UML class diagram in the attached image and return a JSON object.
+
+Requirements:
+1. Generate concrete instances that represent a realistic scenario for the system depicted.
+2. List instances as structured data (do NOT use Graphviz DOT or Mermaid):
+   - Each instance: class_name, instance_name, attributes (concrete key-value pairs, no type annotations).
+   - Do NOT include operations.
+3. List connections between instances as {"from": ..., "to": ...} pairs following the relationships in the class diagram.
+4. For each relationship, evaluate whether the multiplicity is appropriate.
+5. Write "instance_explanation" and all "explanation" values in Japanese.
+6. For "verdict": use "ok" if appropriate, "warning" if questionable, "error" if clearly incorrect.
+7. Return ONLY the JSON object — no markdown, no code blocks, no extra text.
+
+Writing style for Japanese text (strictly follow):
+- "instance_explanation": Short noun-phrase title (not a narrative paragraph).
+  BAD: "図書館の貸出システムを想定したインスタンス例です。一人の司書が、二人の利用者に対して..."
+  GOOD: "司書1人・利用者2人・本3冊の貸出例"
+- "explanation": One short sentence stating only the key reason. Do NOT restate multiplicity values or list multiple justifications.
+  BAD: "1冊の本が0回以上貸し出されるのは自然です。また、Rental側からBookへの多重度が1であるのも適切です。合成集約は..."
+  GOOD: "本は複数回貸し出されるため適切"
+
+JSON format:
+{
+  "instance_explanation": "司書1人・利用者2人・本3冊の貸出例",
+  "instances": [
+    {"class_name": "Librarian", "instance_name": "tanaka", "attributes": {"name": "田中太郎"}},
+    {"class_name": "Borrower", "instance_name": "sato", "attributes": {"name": "佐藤花子"}},
+    {"class_name": "Rental", "instance_name": "rental1", "attributes": {"date": "2024-01-10", "status": "返却済"}}
+  ],
+  "connections": [
+    {"from": "tanaka", "to": "rental1"},
+    {"from": "sato", "to": "rental1"}
+  ],
+  "multiplicity_verifications": [
+    {
+      "from_class": "Librarian",
+      "to_class": "Rental",
+      "original_multiplicity": "1:*",
+      "verdict": "ok",
+      "explanation": "司書は複数の貸出処理を担当するため適切"
+    }
+  ]
+}
+"""
+
+
+def generate_class_instances_and_verify(
+    image_bytes: bytes,
+    session_id: str,
+) -> ClassDiagramWithInstances:
+    if not image_bytes:
+        raise ValueError("画像データが空です。")
+
+    mime_type = _detect_mime_type(image_bytes)
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    provider_name, provider = _get_provider(None)
+
+    start_time = time.time()
+    log_context: Dict[str, Any] = {
+        "timestamp": time.time(),
+        "session_id": session_id,
+        "provider": provider_name,
+        "call": "generate_class_instances_and_verify",
+        "image_bytes": len(image_bytes),
+    }
+    response = None
+    try:
+        response = provider.generate(
+            system_prompt=_INSTANCE_GEN_SYSTEM_PROMPT,
+            user_prompt=_INSTANCE_GEN_USER_PROMPT,
+            image_base64=image_base64,
+            mime_type=mime_type,
+        )
+        data = _extract_json(response.text)
+
+        instances = [
+            InstanceObject(
+                class_name=item["class_name"],
+                instance_name=item["instance_name"],
+                attributes=item.get("attributes", {}),
+            )
+            for item in data.get("instances", [])
+        ]
+        connections = [
+            InstanceConnection(
+                from_instance=conn["from"],
+                to_instance=conn["to"],
+            )
+            for conn in data.get("connections", [])
+        ]
+        verifications = [
+            MultiplicityVerification(
+                from_class=item["from_class"],
+                to_class=item["to_class"],
+                original_multiplicity=item.get("original_multiplicity", ""),
+                verdict=item.get("verdict", "warning"),
+                explanation=item.get("explanation", ""),
+            )
+            for item in data.get("multiplicity_verifications", [])
+        ]
+        result = ClassDiagramWithInstances(
+            instances=instances,
+            connections=connections,
+            instance_explanation=data.get("instance_explanation", ""),
+            multiplicity_verifications=verifications,
+        )
+        log_context.update({
+            "status": "success",
+            "model": response.model,
+            "duration_ms": int((time.time() - start_time) * 1000),
+            "usage": response.usage,
+            "verification_count": len(verifications),
+        })
+        return result
+    except (LLMConfigurationError, LLMGenerationError) as exc:
+        log_context.update({"status": "error", "error": str(exc)})
+        raise
+    except (json.JSONDecodeError, KeyError) as exc:
+        log_context.update({"status": "error", "error": f"json_parse_error: {exc}"})
+        raise LLMGenerationError(f"クラス図のインスタンス生成結果をパースできませんでした: {exc}") from exc
+    except requests.RequestException as exc:
+        log_context.update({"status": "error", "error": f"network_error: {exc}"})
+        raise LLMGenerationError(f"LLM API 呼び出し中にネットワークエラーが発生しました: {exc}") from exc
+    finally:
+        log_context.setdefault("duration_ms", int((time.time() - start_time) * 1000))
+        _log_event(log_context)
+
+
+# ---------------------------------------------------------------------------
+# Class diagram analysis (two-stage LLM calls)
+# ---------------------------------------------------------------------------
+
+def analyze_class_diagram(
+    image_bytes: bytes,
+    session_id: str,
+) -> ClassDiagramAnalysis:
+    if not image_bytes:
+        raise ValueError("画像データが空です。")
+
+    mime_type = _detect_mime_type(image_bytes)
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    provider_name, provider = _get_provider(None)
+
+    start_time = time.time()
+    log_context: Dict[str, Any] = {
+        "timestamp": time.time(),
+        "session_id": session_id,
+        "provider": provider_name,
+        "call": "analyze_class_diagram",
+        "image_bytes": len(image_bytes),
+    }
+    response = None
+    try:
+        response = provider.generate(
+            system_prompt=_CLASS_DIAGRAM_SYSTEM_PROMPT,
+            user_prompt=_CLASS_DIAGRAM_USER_PROMPT,
+            image_base64=image_base64,
+            mime_type=mime_type,
+        )
+        data = _extract_json(response.text)
+
+        issues = [
+            MultiplicityIssue(
+                from_class=item["from"],
+                to_class=item["to"],
+                current_multiplicity=item.get("current_multiplicity", ""),
+                issue=item.get("issue", ""),
+                severity=item.get("severity", "warning"),
+                relationship_index=item.get("relationship_index", 0),
+            )
+            for item in data.get("multiplicity_issues", [])
+        ]
+        result = ClassDiagramAnalysis(
+            mermaid=data.get("mermaid", ""),
+            classes=data.get("classes", []),
+            relationships=data.get("relationships", []),
+            multiplicity_issues=issues,
+            needs_object_diagram=bool(data.get("needs_object_diagram", False)),
+        )
+        log_context.update({
+            "status": "success",
+            "model": response.model,
+            "duration_ms": int((time.time() - start_time) * 1000),
+            "usage": response.usage,
+            "needs_object_diagram": result.needs_object_diagram,
+        })
+        return result
+    except (LLMConfigurationError, LLMGenerationError) as exc:
+        log_context.update({"status": "error", "error": str(exc)})
+        raise
+    except (json.JSONDecodeError, KeyError) as exc:
+        log_context.update({"status": "error", "error": f"json_parse_error: {exc}"})
+        raise LLMGenerationError(f"クラス図の解析結果をパースできませんでした: {exc}") from exc
+    except requests.RequestException as exc:
+        log_context.update({"status": "error", "error": f"network_error: {exc}"})
+        raise LLMGenerationError(f"LLM API 呼び出し中にネットワークエラーが発生しました: {exc}") from exc
+    finally:
+        log_context.setdefault("duration_ms", int((time.time() - start_time) * 1000))
+        _log_event(log_context)
+
+
+def generate_object_diagram(
+    classes: List[Dict[str, Any]],
+    issues: List[MultiplicityIssue],
+    session_id: str,
+) -> ObjectDiagramResult:
+    if not issues:
+        return ObjectDiagramResult(object_diagrams=[])
+
+    provider_name, provider = _get_provider(None)
+    user_prompt = _build_object_diagram_user_prompt(classes, issues)
+
+    start_time = time.time()
+    log_context: Dict[str, Any] = {
+        "timestamp": time.time(),
+        "session_id": session_id,
+        "provider": provider_name,
+        "call": "generate_object_diagram",
+        "issue_count": len(issues),
+    }
+    response = None
+    try:
+        response = provider.generate(
+            system_prompt=_OBJECT_DIAGRAM_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+        )
+        data = _extract_json(response.text)
+
+        diagrams = [
+            ObjectDiagram(
+                relationship_index=item.get("relationship_index", 0),
+                mermaid=item.get("mermaid", ""),
+                explanation=item.get("explanation", ""),
+            )
+            for item in data.get("object_diagrams", [])
+        ]
+        result = ObjectDiagramResult(object_diagrams=diagrams)
+        log_context.update({
+            "status": "success",
+            "model": response.model,
+            "duration_ms": int((time.time() - start_time) * 1000),
+            "usage": response.usage,
+            "diagram_count": len(diagrams),
+        })
+        return result
+    except (LLMConfigurationError, LLMGenerationError) as exc:
+        log_context.update({"status": "error", "error": str(exc)})
+        raise
+    except (json.JSONDecodeError, KeyError) as exc:
+        log_context.update({"status": "error", "error": f"json_parse_error: {exc}"})
+        raise LLMGenerationError(f"オブジェクト図の生成結果をパースできませんでした: {exc}") from exc
+    except requests.RequestException as exc:
+        log_context.update({"status": "error", "error": f"network_error: {exc}"})
         raise LLMGenerationError(f"LLM API 呼び出し中にネットワークエラーが発生しました: {exc}") from exc
     finally:
         log_context.setdefault("duration_ms", int((time.time() - start_time) * 1000))
