@@ -529,7 +529,11 @@ def _qr_scanner_dialog():
             error_placeholder.error("有効なQRコードではありません")
 
 
-@st.dialog("課題を追加")
+def _on_add_assignment_dialog_dismiss():
+    st.session_state["show_add_assignment_dialog"] = False
+
+
+@st.dialog("課題を追加", on_dismiss=_on_add_assignment_dialog_dismiss)
 def _add_assignment_dialog():
     if st.button("📷 QRコードを読み取る", use_container_width=True):
         st.session_state["qr_scanner_active"] = True
@@ -648,7 +652,7 @@ def show_teacher_create_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
@@ -708,7 +712,7 @@ def show_teacher_result_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
@@ -725,7 +729,7 @@ def show_teacher_dashboard_page():
         st.markdown("---")
         st.markdown("""
         <div style='text-align: center; color: #666; font-size: 0.8em;'>
-        UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+        UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
         </div>
         """, unsafe_allow_html=True)
         return
@@ -838,7 +842,7 @@ def show_teacher_dashboard_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
@@ -1153,7 +1157,7 @@ def show_upload_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
@@ -1222,7 +1226,7 @@ def show_class_diagram_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
@@ -1351,7 +1355,7 @@ def show_execution_page():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebApp
+    UML Review Web App <br> https://github.com/bp21063/UMLReviewWebAppSCC
     </div>
     """, unsafe_allow_html=True)
 
