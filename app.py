@@ -14,7 +14,7 @@ import qrcode
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
-from streamlit_qrcode_scanner import qrcode_scanner
+from services.qrcode_scanner import qrcode_scanner
 
 from services import (
     LLMConfigurationError,
@@ -346,6 +346,10 @@ def ensure_session_defaults() -> None:
         st.session_state["qr_scanned_id"] = ""
     if "qr_scanned_pin" not in st.session_state:
         st.session_state["qr_scanned_pin"] = ""
+    if "qr_scanner_active" not in st.session_state:
+        st.session_state["qr_scanner_active"] = False
+    if "show_add_assignment_dialog" not in st.session_state:
+        st.session_state["show_add_assignment_dialog"] = False
 
 
 SUPPORTED_LLM_PROVIDER_LABELS = {
@@ -507,18 +511,28 @@ def _generate_qr_png_bytes(assignment_id: str, pin: str) -> bytes:
 # 課題追加ダイアログ（学生用）
 # ---------------------------------------------------------------------------
 
+@st.dialog("QRコードを読み取る", width="large", dismissible=False)
+def _qr_scanner_dialog():
+    if st.button("キャンセル", use_container_width=True):
+        st.session_state["qr_scanner_active"] = False
+        st.rerun()
+    st.caption("QRコードをカメラに写してください")
+    scanned = qrcode_scanner(key="assignment_qr_scanner")
+    if scanned:
+        parsed = _parse_qr_payload(scanned)
+        if parsed:
+            st.session_state["qr_scanned_id"], st.session_state["qr_scanned_pin"] = parsed
+            st.session_state["qr_scanner_active"] = False
+            st.rerun()
+        else:
+            st.error("有効なQRコードではありません")
+
+
 @st.dialog("課題を追加")
 def _add_assignment_dialog():
-    with st.expander("QRコードを読み取る"):
-        st.caption("カメラへのアクセスを許可してください。手入力でも追加できます。")
-        scanned = qrcode_scanner(key="assignment_qr_scanner")
-        if scanned:
-            parsed = _parse_qr_payload(scanned)
-            if parsed:
-                st.session_state["qr_scanned_id"], st.session_state["qr_scanned_pin"] = parsed
-                st.rerun()
-            else:
-                st.error("有効なQRコードではありません")
+    if st.button("📷 QRコードを読み取る", use_container_width=True):
+        st.session_state["qr_scanner_active"] = True
+        st.rerun()
 
     assignment_id_input = st.text_input(
         "課題ID（例: UMLR-ABC123）",
@@ -551,6 +565,7 @@ def _add_assignment_dialog():
             st.session_state["session_assignments"].append(assignment)
         st.session_state["qr_scanned_id"] = ""
         st.session_state["qr_scanned_pin"] = ""
+        st.session_state["show_add_assignment_dialog"] = False
         st.rerun()
 
 
@@ -886,6 +901,11 @@ def main():
         st.markdown("---")
         st.markdown("### 課題")
         if st.button("+ 課題を追加", use_container_width=True):
+            st.session_state["show_add_assignment_dialog"] = True
+            st.session_state["qr_scanner_active"] = False
+        if st.session_state.get("qr_scanner_active"):
+            _qr_scanner_dialog()
+        elif st.session_state.get("show_add_assignment_dialog"):
             _add_assignment_dialog()
         for a in st.session_state.get("session_assignments", []):
             st.caption(f"📋 {a['title']} ({a['assignment_id']})")

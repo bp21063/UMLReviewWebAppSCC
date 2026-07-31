@@ -6,6 +6,5 @@ pillow>=10.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 qrcode[pil]
-streamlit-qrcode-scanner
 google-auth-oauthlib
 google-api-python-client
