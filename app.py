@@ -516,6 +516,7 @@ def _qr_scanner_dialog():
     if st.button("キャンセル", use_container_width=True):
         st.session_state["qr_scanner_active"] = False
         st.rerun()
+    error_placeholder = st.empty()
     st.caption("QRコードをカメラに写してください")
     scanned = qrcode_scanner(key="assignment_qr_scanner")
     if scanned:
@@ -525,7 +526,7 @@ def _qr_scanner_dialog():
             st.session_state["qr_scanner_active"] = False
             st.rerun()
         else:
-            st.error("有効なQRコードではありません")
+            error_placeholder.error("有効なQRコードではありません")
 
 
 @st.dialog("課題を追加")
