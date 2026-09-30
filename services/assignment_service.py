@@ -1,4 +1,6 @@
+import hashlib
 import random
+import re
 import string
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -36,13 +38,14 @@ def _assignment_row_to_dict(row: List[str]) -> Dict[str, Any]:
 
 
 def _log_row_to_dict(row: List[str]) -> Dict[str, Any]:
-    fields = row + [""] * (5 - len(row))
+    fields = row + [""] * (6 - len(row))
     return {
         "assignment_id": fields[0],
         "student_id": fields[1],
         "timestamp": fields[2],
         "score": int(fields[3]) if fields[3] else None,
         "feedback": fields[4],
+        "submission_image_file_id": fields[5],
     }
 
 
@@ -54,8 +57,8 @@ def load_assignments() -> List[Dict[str, Any]]:
 def create_assignment(
     diagram_type: str,
     title: str,
-    answer_image_bytes: bytes,
-    answer_image_ext: str,
+    answer_image_bytes: Optional[bytes] = None,
+    answer_image_ext: Optional[str] = None,
     additional_instructions: str = "",
     scoring_criteria: str = "",
     enable_logging: bool = False,
@@ -65,13 +68,18 @@ def create_assignment(
     pin = _generate_pin()
 
     folder_id = drive_svc.create_folder(assignment_id, drive_svc.get_drive_folder_id())
-    mimetype = f"image/{answer_image_ext.lower()}" if answer_image_ext.lower() != "jpg" else "image/jpeg"
-    answer_image_file_id = drive_svc.upload_file(
-        f"answer_image.{answer_image_ext}",
-        answer_image_bytes,
-        mimetype,
-        folder_id,
-    )
+    answer_image_file_id = ""
+    if answer_image_bytes:
+        if not answer_image_ext:
+            raise ValueError("模範解答画像の拡張子が指定されていません。")
+        normalized_ext = answer_image_ext.lower()
+        mimetype = f"image/{normalized_ext}" if normalized_ext != "jpg" else "image/jpeg"
+        answer_image_file_id = drive_svc.upload_file(
+            f"answer_image.{normalized_ext}",
+            answer_image_bytes,
+            mimetype,
+            folder_id,
+        )
     created_at = datetime.now().isoformat()
 
     assignment: Dict[str, Any] = {
@@ -120,12 +128,64 @@ def save_log_entry(
     student_id: str,
     feedback: str,
     score: Optional[int] = None,
+    submission_image_bytes: Optional[bytes] = None,
+    submission_image_ext: Optional[str] = None,
+    submission_image_mimetype: Optional[str] = None,
 ) -> None:
     timestamp = datetime.now().isoformat()
+    submission_image_file_id = ""
+
+    if submission_image_bytes:
+        if not submission_image_ext:
+            raise ValueError("提出画像の拡張子が指定されていません。")
+        assignment_folder_id = drive_svc.find_folder(
+            assignment_id,
+            drive_svc.get_drive_folder_id(),
+        )
+        if not assignment_folder_id:
+            raise ValueError(f"課題フォルダが見つかりません: {assignment_id}")
+
+        submissions_folder_id = drive_svc.get_or_create_folder(
+            "submissions",
+            assignment_folder_id,
+        )
+        student_folder_id = drive_svc.get_or_create_folder(
+            _student_folder_name(student_id),
+            submissions_folder_id,
+        )
+        normalized_ext = re.sub(r"[^a-z0-9]", "", submission_image_ext.lower()) or "png"
+        image_name = f"submission_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.{normalized_ext}"
+        mimetype = submission_image_mimetype or _image_mimetype(normalized_ext)
+        submission_image_file_id = drive_svc.upload_file(
+            image_name,
+            submission_image_bytes,
+            mimetype,
+            student_folder_id,
+        )
+
+    drive_svc.ensure_header_cell(LOGS_SHEET, "F1", "submission_image_file_id")
     drive_svc.append_row(LOGS_SHEET, [
         assignment_id, student_id, timestamp,
         str(score) if score is not None else "", feedback,
+        submission_image_file_id,
     ])
+
+
+def _student_folder_name(student_id: str) -> str:
+    readable_id = re.sub(r"[^\w.-]+", "_", student_id, flags=re.UNICODE).strip("._")
+    readable_id = readable_id[:80] or "student"
+    digest = hashlib.sha256(student_id.encode("utf-8")).hexdigest()[:8]
+    return f"{readable_id}_{digest}"
+
+
+def _image_mimetype(extension: str) -> str:
+    if extension in {"jpg", "jpeg"}:
+        return "image/jpeg"
+    if extension == "svg":
+        return "image/svg+xml"
+    if extension == "tiff":
+        return "image/tiff"
+    return f"image/{extension}"
 
 
 def delete_assignment(assignment_id: str) -> None:
@@ -134,10 +194,13 @@ def delete_assignment(assignment_id: str) -> None:
     if target is None:
         return
 
-    # answer_image_file_idの親フォルダ({assignment_id}フォルダ)を削除すれば画像も道連れになる
-    parent_id = drive_svc.get_parent_folder_id(target["answer_image_file_id"])
-    if parent_id:
-        drive_svc.delete_file(parent_id)
+    # 課題フォルダを削除すると、模範解答と学生の提出画像も一緒に削除される。
+    assignment_folder_id = drive_svc.find_folder(
+        assignment_id,
+        drive_svc.get_drive_folder_id(),
+    )
+    if assignment_folder_id:
+        drive_svc.delete_file(assignment_folder_id)
 
     drive_svc.delete_rows(
         ASSIGNMENTS_SHEET,

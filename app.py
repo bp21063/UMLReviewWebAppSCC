@@ -605,8 +605,9 @@ def show_teacher_create_page():
     with st.form("teacher_create_form"):
         title = st.text_input("課題タイトル *")
         answer_image_file = st.file_uploader(
-            "模範解答画像 *",
+            "模範解答画像（任意）",
             type=["png", "jpg", "jpeg", "bmp", "tiff"],
+            help="現在は保存のみ行い、LLMの回答生成には使用しません。",
         )
         additional_instructions = st.text_area(
             "追加指示（任意）",
@@ -620,24 +621,29 @@ def show_teacher_create_page():
         )
         enable_logging = st.toggle("提出ログを記録する")
         if enable_logging:
-            st.caption("学生に事前にIDを伝えておいてください。IDはアプリ側では管理しません。")
+            st.caption(
+                "学生に事前にIDを伝えておいてください。"
+                "IDごとに提出画像と生成結果をGoogle Driveに記録します。"
+            )
 
         submitted = st.form_submit_button("課題を登録", type="primary", use_container_width=True)
 
     if submitted:
         if not title.strip():
             st.error("課題タイトルを入力してください")
-        elif answer_image_file is None:
-            st.error("模範解答画像をアップロードしてください")
         else:
             try:
-                ext = answer_image_file.name.rsplit(".", 1)[-1].lower()
+                answer_image_bytes = None
+                answer_image_ext = None
+                if answer_image_file is not None:
+                    answer_image_bytes = answer_image_file.getvalue()
+                    answer_image_ext = answer_image_file.name.rsplit(".", 1)[-1].lower()
                 with st.spinner("課題を登録中..."):
                     assignment = create_assignment(
                         diagram_type=diagram_type,
                         title=title.strip(),
-                        answer_image_bytes=answer_image_file.getvalue(),
-                        answer_image_ext=ext,
+                        answer_image_bytes=answer_image_bytes,
+                        answer_image_ext=answer_image_ext,
                         additional_instructions=additional_instructions.strip(),
                         scoring_criteria=scoring_criteria.strip(),
                         enable_logging=enable_logging,
@@ -820,9 +826,23 @@ def show_teacher_dashboard_page():
                     "提出番号": entry["submission_number"],
                     "日時": entry["timestamp"][:16].replace("T", " "),
                     "スコア": entry["score"] if entry["score"] is not None else "-",
+                    "入力画像": (
+                        f"https://drive.google.com/file/d/{entry['submission_image_file_id']}/view"
+                        if entry.get("submission_image_file_id") else None
+                    ),
                 })
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "入力画像": st.column_config.LinkColumn(
+                        "入力画像",
+                        display_text="開く",
+                    ),
+                },
+            )
 
             # スコア推移グラフ（スコアありの場合）
             scored_logs = [e for e in logs if e["score"] is not None]
@@ -861,7 +881,20 @@ def main():
 
     # サイドバー
     with st.sidebar:
+        # 課題（学生用）
+        st.markdown("### 課題")
+        if st.button("+ 課題を追加", use_container_width=True):
+            st.session_state["show_add_assignment_dialog"] = True
+            st.session_state["qr_scanner_active"] = False
+        if st.session_state.get("qr_scanner_active"):
+            _qr_scanner_dialog()
+        elif st.session_state.get("show_add_assignment_dialog"):
+            _add_assignment_dialog()
+        for a in st.session_state.get("session_assignments", []):
+            st.caption(f"📋 {a['title']} ({a['assignment_id']})")
+
         # 認証
+        st.markdown("---")
         st.markdown("### 認証")
         st.text_input(
             "パスワード",
@@ -901,19 +934,6 @@ def main():
                 st.session_state["confirm_delete2"] = False
                 st.session_state["page"] = "teacher_dashboard"
                 st.rerun()
-
-        # 課題（学生用）
-        st.markdown("---")
-        st.markdown("### 課題")
-        if st.button("+ 課題を追加", use_container_width=True):
-            st.session_state["show_add_assignment_dialog"] = True
-            st.session_state["qr_scanner_active"] = False
-        if st.session_state.get("qr_scanner_active"):
-            _qr_scanner_dialog()
-        elif st.session_state.get("show_add_assignment_dialog"):
-            _add_assignment_dialog()
-        for a in st.session_state.get("session_assignments", []):
-            st.caption(f"📋 {a['title']} ({a['assignment_id']})")
 
     # カスタムCSS（モバイル対応）
     st.markdown("""
@@ -1045,10 +1065,14 @@ def show_upload_page():
                         st.session_state['simulator_type'] = simulator_key
                         image_bytes = uploaded_file.getvalue()
                         uploaded_file.seek(0)
+                        submission_image_ext = uploaded_file.name.rsplit(".", 1)[-1].lower()
+                        submission_image_mimetype = uploaded_file.type
 
                         # 課題の追加指示をプロンプトに組み込む
                         prompt_overrides: dict = {}
                         if selected_assignment:
+                            # TODO: answer_image_file_id がある場合はDriveから模範解答画像を取得し、
+                            # 学生の図を補助する参考画像としてLLMへ渡す予定。未指定時は現行プロンプトを保つ。
                             parts = []
                             if selected_assignment.get("additional_instructions"):
                                 parts.append(selected_assignment["additional_instructions"])
@@ -1083,6 +1107,9 @@ def show_upload_page():
                                             assignment_id=selected_assignment["assignment_id"],
                                             student_id=st.session_state["student_id"],
                                             feedback=feedback_summary,
+                                            submission_image_bytes=image_bytes,
+                                            submission_image_ext=submission_image_ext,
+                                            submission_image_mimetype=submission_image_mimetype,
                                         )
                             except (LLMConfigurationError, LLMGenerationError) as exc:
                                 st.error(f"❌ クラス図の解析に失敗しました: {exc}")
@@ -1107,6 +1134,9 @@ def show_upload_page():
                                             assignment_id=selected_assignment["assignment_id"],
                                             student_id=st.session_state["student_id"],
                                             feedback=generated_code,
+                                            submission_image_bytes=image_bytes,
+                                            submission_image_ext=submission_image_ext,
+                                            submission_image_mimetype=submission_image_mimetype,
                                         )
                             except (LLMConfigurationError, LLMGenerationError) as exc:
                                 st.session_state['generation_provider'] = ""

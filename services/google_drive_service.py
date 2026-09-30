@@ -14,6 +14,7 @@ _SCOPES = [
 
 _drive_service = None
 _sheets_service = None
+_ensured_header_cells = set()
 
 
 def _get_credentials() -> Credentials:
@@ -63,6 +64,27 @@ def create_folder(name: str, parent_id: str) -> str:
     return file["id"]
 
 
+def find_folder(name: str, parent_id: str) -> Optional[str]:
+    escaped_name = name.replace("\\", "\\\\").replace("'", "\\'")
+    escaped_parent_id = parent_id.replace("\\", "\\\\").replace("'", "\\'")
+    result = _drive().files().list(
+        q=(
+            f"name = '{escaped_name}' and "
+            f"'{escaped_parent_id}' in parents and "
+            "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        ),
+        spaces="drive",
+        fields="files(id)",
+        pageSize=1,
+    ).execute()
+    files = result.get("files", [])
+    return files[0]["id"] if files else None
+
+
+def get_or_create_folder(name: str, parent_id: str) -> str:
+    return find_folder(name, parent_id) or create_folder(name, parent_id)
+
+
 def upload_file(name: str, content: bytes, mimetype: str, parent_id: str) -> str:
     media = MediaInMemoryUpload(content, mimetype=mimetype)
     file = _drive().files().create(
@@ -109,6 +131,29 @@ def read_all_rows(sheet_name: str) -> List[List[str]]:
         range=f"{sheet_name}!A2:Z",
     ).execute()
     return result.get("values", [])
+
+
+def ensure_header_cell(sheet_name: str, cell: str, value: str) -> None:
+    """既存シートの空ヘッダーだけを補完する。同一プロセス内では1回だけ確認する。"""
+    cache_key = (sheet_name, cell, value)
+    if cache_key in _ensured_header_cells:
+        return
+
+    spreadsheet_id = get_spreadsheet_id()
+    cell_range = f"{sheet_name}!{cell}"
+    result = _sheets().spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=cell_range,
+    ).execute()
+    current_values = result.get("values", [])
+    if not current_values or not current_values[0] or not current_values[0][0]:
+        _sheets().spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=cell_range,
+            valueInputOption="RAW",
+            body={"values": [[value]]},
+        ).execute()
+    _ensured_header_cells.add(cache_key)
 
 
 def delete_rows(sheet_name: str, matcher: Callable[[List[str]], bool]) -> int:
